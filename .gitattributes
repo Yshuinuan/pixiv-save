@@ -1,0 +1,30 @@
+# 统一换行符处理，避免不同系统下 diff 出现整文件差异
+#
+# 规则：仓库里一律存 LF，检出到 Windows 时由 Git 按 core.autocrlf 决定。
+
+# 默认：让 Git 自动判断文本文件并统一为 LF
+* text=auto eol=lf
+
+# 明确指定各类型文件
+*.js      text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+# .bat / .cmd 必须是 CRLF，否则 Windows 下可能无法执行
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# 二进制文件，不做任何换行转换
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.zip     binary
+*.epub    binary
+*.ico     binary
+
+# 让 GitHub 语言统计正确识别
+*.user.js linguist-language=JavaScript

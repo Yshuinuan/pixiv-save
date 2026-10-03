@@ -1,9 +1,14 @@
 // ==UserScript==
 // @name         Pixiv 存图
-// @namespace    local.pixiv.save
-// @version      2.0.0
+// @namespace    https://github.com/Yshuinuan/pixiv-save
+// @version      2.1.0
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
-// @author       local
+// @author       Yshuinuan
+// @homepageURL  https://github.com/Yshuinuan/pixiv-save
+// @supportURL   https://github.com/Yshuinuan/pixiv-save/issues
+// @updateURL    https://raw.githubusercontent.com/Yshuinuan/pixiv-save/main/pixiv-save.user.js
+// @downloadURL  https://raw.githubusercontent.com/Yshuinuan/pixiv-save/main/pixiv-save.user.js
+// @license      MIT
 // @match        https://www.pixiv.net/*
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
