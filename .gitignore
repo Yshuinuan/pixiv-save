@@ -1,0 +1,33 @@
+# 依赖与构建产物（本项目其实没有依赖，留着以防万一）
+node_modules/
+package-lock.json
+pnpm-lock.yaml
+yarn.lock
+
+# 自检产生的临时文件
+*.epub
+_pub*
+_epub-test.*
+_txt-test.*
+_test-*
+_debug-*
+_probe-*
+
+# 编辑器 / 系统文件
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 日志
+*.log
+
+# 本地保存的图片（如果你把仓库建在存图目录里，别把图提交上去）
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+!docs/**/*.png
+!docs/**/*.jpg
