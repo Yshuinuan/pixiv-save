@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pixiv 存图
 // @namespace    https://github.com/Yshuinuan/pixiv-save
-// @version      2.1.0
+// @version      2.2.0
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
 // @author       Yshuinuan
 // @homepageURL  https://github.com/Yshuinuan/pixiv-save
@@ -52,6 +52,7 @@
     novelExport: 'md', // 'md' | 'txt'
     skipExisting: true,
     saveAll: true,
+    skipDeleteConfirm: false, // 用户勾了"以后不再询问"后置 true
     activeSlot: null,
     slots: [] // [{ id, name }]
   }
@@ -397,14 +398,28 @@
   async function removeSlot(id) {
     const s = runtime.slots.find((x) => x.id === id)
     if (!s) return
-    if (!(await uiConfirm(`删除路径「${s.name}」？\n\n只移除绑定，磁盘上的文件不会被删。`))) return
+
+    // 用户可以选择不再确认（懒人模式），但默认还是要确认一次，避免误删
+    if (!settings.skipDeleteConfirm) {
+      const r = await uiConfirm(
+        `删除路径「${s.name}」？\n\n只移除绑定，磁盘上的文件不会被删。`,
+        { checkbox: '以后不再询问' }
+      )
+      if (!r.ok) return
+      if (r.checked) {
+        settings.skipDeleteConfirm = true
+        persist()
+      }
+    }
+
     await idbDel(handleKey(id))
     runtime.slots = runtime.slots.filter((x) => x.id !== id)
     settings.slots = settings.slots.filter((x) => x.id !== id)
     if (settings.activeSlot === id) settings.activeSlot = runtime.slots.length ? runtime.slots[0].id : null
     persist()
     render()
-    setStatus(`已移除：${s.name}`, 'ok')
+    const left = runtime.slots.find((x) => x.id === settings.activeSlot)
+    setStatus(`已移除：${s.name}` + (left ? `　→ 当前目标：${left.name}` : '　→ 已无保存路径'), 'ok')
   }
 
   async function renameSlot(id) {
@@ -798,14 +813,32 @@
     }
 
     runtime.slots.forEach((s) => {
-      const btn = document.createElement('button')
-      btn.className = 'ps-slot' + (s.id === settings.activeSlot ? ' ps-active' : '')
-      if (!s.granted) btn.classList.add('ps-nogrant')
-      btn.textContent = (s.id === settings.activeSlot ? '✓ ' : '') + s.name
-      btn.title =
+      // 外壳：负责选中高亮；里面的 × 按钮负责删除
+      const chip = document.createElement('div')
+      chip.className = 'ps-chip' + (s.id === settings.activeSlot ? ' ps-active' : '')
+      if (!s.granted) chip.classList.add('ps-nogrant')
+
+      const label = document.createElement('span')
+      label.className = 'ps-chip-label'
+      label.textContent = (s.id === settings.activeSlot ? '✓ ' : '') + s.name
+      chip.title =
         (!s.granted ? '⚠ 权限已失效，点一下重新授权\n' : '') +
-        '单击 = 选中为目标（高亮）\n右键 = 重命名 / 删除\n选中后点「存当前页」才会保存'
-      btn.addEventListener('click', async () => {
+        '单击 = 选中为目标（高亮）\n点 × = 删除这个路径\n双击 = 重命名'
+      chip.appendChild(label)
+
+      // 显式的删除按钮——右键菜单用户根本发现不了
+      const del = document.createElement('button')
+      del.className = 'ps-chip-del'
+      del.textContent = '×'
+      del.title = `删除「${s.name}」（只移除绑定，不删磁盘文件）`
+      del.addEventListener('click', (e) => {
+        e.stopPropagation()
+        e.preventDefault()
+        removeSlot(s.id)
+      })
+      chip.appendChild(del)
+
+      chip.addEventListener('click', async () => {
         settings.activeSlot = s.id
         persist()
         render()
@@ -822,14 +855,20 @@
         }
         setStatus(`已选中：${s.name}　→ 点「存当前页」开始保存`, 'info')
       })
-      btn.addEventListener('contextmenu', (e) => {
+
+      chip.addEventListener('dblclick', (e) => {
+        e.preventDefault()
+        renameSlot(s.id)
+      })
+
+      chip.addEventListener('contextmenu', (e) => {
         e.preventDefault()
         uiMenu(e.clientX, e.clientY, [
           { label: '重命名', run: () => renameSlot(s.id) },
           { label: '删除', run: () => removeSlot(s.id) }
         ])
       })
-      listEl.appendChild(btn)
+      listEl.appendChild(chip)
     })
 
     // 目标行：明确当前会存到哪里
@@ -878,6 +917,7 @@
           <button id="ps-add" title="添加一个保存路径">＋</button>
         </div>
         <div class="ps-hint">① 点路径选中（变蓝高亮）　② 点「存当前页」</div>
+        <div class="ps-hint">路径上的 × 可删除　·　双击路径可重命名</div>
         <div id="ps-target" class="ps-target">目标：未选择</div>
         <div id="ps-mode" class="ps-hint"></div>
         <div class="ps-row">
@@ -935,13 +975,30 @@
       #pixiv-save-panel button.ps-primary { background:#0096fa; border-color:#0096fa; color:#fff; font-weight:600; }
       #pixiv-save-panel button.ps-primary:hover { background:#22a6ff; }
       #pixiv-save-panel button.ps-ghost { flex:0 0 auto; }
-      .ps-slot { max-width:150px; overflow:hidden; text-overflow:ellipsis; }
-      .ps-slot.ps-active {
+      .ps-chip {
+        display:inline-flex; align-items:center; gap:2px; max-width:160px;
+        background:#34343d; border:1px solid #4a4a55; border-radius:6px;
+        padding:0 4px 0 9px; cursor:pointer; font-size:12px; user-select:none;
+      }
+      .ps-chip:hover { background:#41414d; }
+      .ps-chip-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; padding:5px 0; }
+      .ps-chip.ps-active {
         background:#0096fa; border-color:#7cc4ff; color:#fff; font-weight:700;
         box-shadow:0 0 0 2px rgba(0,150,250,.35);
       }
-      .ps-slot.ps-active:hover { background:#22a6ff; }
-      .ps-slot.ps-nogrant { border-color:#a06a2a; color:#ffd479; }
+      .ps-chip.ps-active:hover { background:#22a6ff; }
+      .ps-chip.ps-nogrant { border-color:#a06a2a; color:#ffd479; }
+      /* 删除按钮：静默显示，悬停时变红，避免误触又保证可发现 */
+      #pixiv-save-panel .ps-chip-del {
+        flex:0 0 auto; background:transparent; border:none; color:inherit; opacity:.45;
+        font-size:14px; line-height:1; padding:2px 4px; margin-left:1px; cursor:pointer;
+        border-radius:4px;
+      }
+      #pixiv-save-panel .ps-chip:hover .ps-chip-del { opacity:.85; }
+      #pixiv-save-panel .ps-chip-del:hover {
+        background:rgba(255,80,80,.25); color:#ff8f8f; opacity:1;
+      }
+      .ps-chip.ps-active .ps-chip-del { color:#eaf6ff; }
       .ps-target { font-size:11.5px; color:#8b8b96; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .ps-target.ok { color:#7ee787; }
       .ps-target.warn { color:#ffd479; }
@@ -1097,31 +1154,41 @@
     })
   }
 
-  /** 自绘确认框（GM_registerMenuCommand 之外的情况） */
-  function uiConfirm(text) {
+  /** 自绘确认框。返回 { ok, checked }，可选一个"不再询问"复选框 */
+  function uiConfirm(text, opts) {
+    const withCheckbox = !!(opts && opts.checkbox)
     return new Promise((resolve) => {
       const wrap = document.createElement('div')
       wrap.style.cssText =
         'position:fixed;inset:0;z-index:2147483602;background:rgba(0,0,0,.5);display:flex;' +
         'align-items:center;justify-content:center;font:13px "Microsoft YaHei",system-ui,sans-serif'
       const safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>')
+      const cbHtml = withCheckbox
+        ? `<label style="display:flex;align-items:center;gap:6px;margin-bottom:12px;font-size:12px;color:#9a9aa5;cursor:pointer">
+             <input type="checkbox" id="ps-cd" /> ${opts.checkbox}
+           </label>`
+        : ''
       wrap.innerHTML = `
         <div style="background:#23232a;border:1px solid #4a4a55;border-radius:10px;padding:14px;width:300px;color:#e8e8e8">
           <div style="margin-bottom:12px;line-height:1.6">${safe}</div>
+          ${cbHtml}
           <div style="display:flex;gap:8px;justify-content:flex-end">
             <button id="ps-cc" style="background:#34343d;color:#e8e8e8;border:1px solid #4a4a55;border-radius:6px;padding:5px 12px;cursor:pointer">取消</button>
-            <button id="ps-ck" style="background:#c0392b;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600">确定</button>
+            <button id="ps-ck" style="background:#c0392b;color:#fff;border:none;border-radius:6px;padding:5px 12px;cursor:pointer;font-weight:600">删除</button>
           </div>
         </div>`
       document.body.appendChild(wrap)
-      const done = (v) => {
+      const done = (ok) => {
+        const cd = wrap.querySelector('#ps-cd')
+        const checked = !!(cd && cd.checked)
         wrap.remove()
-        resolve(v)
+        resolve({ ok, checked })
       }
       wrap.querySelector('#ps-ck').addEventListener('click', () => done(true))
       wrap.querySelector('#ps-cc').addEventListener('click', () => done(false))
       wrap.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') done(false)
+        if (e.key === 'Enter') done(true)
       })
     })
   }
