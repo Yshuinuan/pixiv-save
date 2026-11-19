@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pixiv 存图
 // @namespace    https://github.com/Yshuinuan/pixiv-save
-// @version      2.2.2
+// @version      2.3.0
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
 // @author       Yshuinuan
 // @homepageURL  https://github.com/Yshuinuan/pixiv-save
@@ -290,17 +290,31 @@
    * 注意 Origin 是浏览器的受禁头部，某些版本下设置它会让整个请求失败，
    * 所以备一套不带 Origin 的方案。
    */
+  /**
+   * 请求方式优先级。
+   *
+   * 为什么 fetch 模式排第一（实测结论）：
+   *   i.pximg.net 强制校验 Referer，不带就是 403。
+   *   但 Referer 属于浏览器的「受禁头部」，XMLHttpRequest 无法合法设置它。
+   *   走 Tampermonkey 默认的 XHR 路径时，请求头会异常，CDN 直接把连接重置
+   *   （表现为 onerror、拿不到任何 HTTP 状态码）。
+   *   而 fetch 模式用 fetch() 的 referrer 选项，这是浏览器允许的正规途径，
+   *   能正确带上 Referer —— 实测下载成功。
+   *
+   * 后面的 XHR 变体保留作兜底（暴力猴等管理器可能没有 fetch 选项）。
+   */
   const FETCH_STRATEGIES = [
     {
-      name: 'GM + Referer + Origin',
+      name: 'fetch 模式 + Referer',
+      opts: { headers: { Referer: 'https://www.pixiv.net/' }, fetch: true }
+    },
+    { name: 'fetch 模式 无自定义头', opts: { fetch: true } },
+    {
+      name: 'XHR + Referer + Origin',
       opts: { headers: { Referer: 'https://www.pixiv.net/', Origin: 'https://www.pixiv.net' } }
     },
-    { name: 'GM + Referer', opts: { headers: { Referer: 'https://www.pixiv.net/' } } },
-    { name: 'GM 无自定义头', opts: {} },
-    {
-      name: 'GM fetch 模式 + Referer',
-      opts: { headers: { Referer: 'https://www.pixiv.net/' }, fetch: true }
-    }
+    { name: 'XHR + Referer', opts: { headers: { Referer: 'https://www.pixiv.net/' } } },
+    { name: 'XHR 无自定义头', opts: {} }
   ]
 
   /** 从多套方案里找一套能成功的，全失败则抛出汇总信息 */
@@ -311,13 +325,12 @@
       try {
         const blob = await gmFetchBlobOnce(url, s.opts)
         if (!blob || !blob.size) throw new Error('返回内容为空')
-        // 不是第一种方案成功，说明常规路径有问题，值得记一笔
+        // 不是首选方案成功，说明主路径在这个环境里不可用，值得记一笔
         if (i > 0) log(`⚠ 用备用方式下载成功：${s.name}`)
         return blob
       } catch (e) {
         errors.push(`${s.name} → ${e.message}`)
         log(`下载失败 [${s.name}]`, e.message)
-        // 明显是网络不可达时，后面的方案大概率也一样，少等一会
         await sleep(i === 0 ? 400 : 200)
       }
     }

@@ -213,9 +213,24 @@ Chrome 有时会把目录权限降级。面板上该路径按钮会变成橙色�
 ## 技术说明
 
 - **写文件**：`window.showDirectoryPicker()` 拿到目录句柄，用 `createWritable()` 直接写入。句柄可被结构化克隆，因此能存进 IndexedDB 跨会话保留。
-- **取图**：必须用 `GM_xmlhttpRequest`。直接 `fetch` 原图会被 `i.pximg.net` 的 CORS 策略拦截（实测抛 `Failed to fetch`），而扩展层请求不受同源限制，并能自定义 `Referer`。
 - **取小说**：请求 `/ajax/novel/{id}`，扩展层请求会自动携带你的登录 Cookie。
 - **全程本地**：脚本只访问 `pixiv.net` 和 `i.pximg.net`，不向任何第三方发送数据。
+
+### 取图为什么要用 GM_xmlhttpRequest 的 fetch 模式
+
+`i.pximg.net` 强制校验 `Referer`，缺失就返回 `403`。但页面内直接 `fetch` 会被 CORS 拦截（实测 `Failed to fetch`），所以只能走扩展层的请求。
+
+而扩展层请求有个坑：
+
+| 方式 | 结果 |
+|---|---|
+| `GM_xmlhttpRequest`（默认 XHR）+ `Referer` | **连接被重置**，拿不到任何 HTTP 状态码 |
+| `GM_xmlhttpRequest`（默认 XHR）不带 Referer | `403`（盗链拦截） |
+| `GM_xmlhttpRequest` + `fetch: true` + `Referer` | ✅ 成功 |
+
+原因是 **`Referer` 属于浏览器的受禁头部**，`XMLHttpRequest` 无法合法设置它——XHR 路径强行带上会导致请求头异常，CDN 直接重置连接。而 `fetch: true` 模式改用 `fetch()` 的 `referrer` 选项，这是浏览器允许的正规途径。
+
+所以脚本把 `fetch` 模式排在第一位，XHR 变体仅作兜底（暴力猴等其他管理器可能没有 `fetch` 选项）。
 
 ---
 
