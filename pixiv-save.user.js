@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pixiv 存图
 // @namespace    https://github.com/Yshuinuan/pixiv-save
-// @version      2.2.0
+// @version      2.2.1
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
 // @author       Yshuinuan
 // @homepageURL  https://github.com/Yshuinuan/pixiv-save
@@ -13,6 +13,7 @@
 // @run-at       document-idle
 // @grant        GM_xmlhttpRequest
 // @connect      pximg.net
+// @connect      i.pximg.net
 // @connect      pixiv.net
 // ==/UserScript==
 
@@ -244,30 +245,105 @@
   }
 
   // ============================================================
-  // 5. 取图：只走 GM_xmlhttpRequest
+  // 5. 取图
   //    实测 fetch 会被 pximg 的 CORS 策略直接掐断（Failed to fetch），
   //    而 GM_xmlhttpRequest 在扩展层发请求，不受 CORS 限制。
+  //
+  //    但 GM 请求仍可能因为「网络到不了 i.pximg.net」或「头部被拒」
+  //    而触发 onerror（此时连 HTTP 状态码都没有）。所以这里准备多套
+  //    请求方式，逐个尝试并把每种的失败原因都记下来，便于定位。
   // ============================================================
-  function fetchBlob(url) {
+
+  /** 单次 GM 请求，失败时尽量把底层原因带出来 */
+  function gmFetchBlobOnce(url, opts) {
+    const o = opts || {}
     return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
+      const details = {
         method: 'GET',
         url,
         responseType: 'blob',
         timeout: 60000, // 原图可能 20MB+，别用短超时
-        headers: {
-          Referer: 'https://www.pixiv.net/',
-          Origin: 'https://www.pixiv.net'
-        },
         onload: (r) => {
           if (r.status >= 200 && r.status < 300 && r.response) resolve(r.response)
-          else reject(new Error('HTTP ' + r.status))
+          else reject(new Error('HTTP ' + r.status + (r.statusText ? ' ' + r.statusText : '')))
         },
-        onerror: () => reject(new Error('网络错误')),
-        ontimeout: () => reject(new Error('超时（60s）')),
+        onerror: (r) => {
+          // onerror 时通常没有状态码，只能尽量抓底层信息
+          const extra = (r && (r.error || r.statusText)) || ''
+          reject(new Error('网络错误' + (extra ? '（' + extra + '）' : '（未收到任何 HTTP 响应）')))
+        },
+        ontimeout: () => reject(new Error('超时（60 秒）')),
         onabort: () => reject(new Error('已中止'))
-      })
+      }
+      if (o.headers) details.headers = o.headers
+      if (o.fetch) details.fetch = true
+      try {
+        GM_xmlhttpRequest(details)
+      } catch (e) {
+        reject(new Error('请求无法发起：' + (e.message || e)))
+      }
     })
+  }
+
+  /**
+   * 多种请求方式，按"历史上成功过的"顺序排列。
+   * 注意 Origin 是浏览器的受禁头部，某些版本下设置它会让整个请求失败，
+   * 所以备一套不带 Origin 的方案。
+   */
+  const FETCH_STRATEGIES = [
+    {
+      name: 'GM + Referer + Origin',
+      opts: { headers: { Referer: 'https://www.pixiv.net/', Origin: 'https://www.pixiv.net' } }
+    },
+    { name: 'GM + Referer', opts: { headers: { Referer: 'https://www.pixiv.net/' } } },
+    { name: 'GM 无自定义头', opts: {} },
+    {
+      name: 'GM fetch 模式 + Referer',
+      opts: { headers: { Referer: 'https://www.pixiv.net/' }, fetch: true }
+    }
+  ]
+
+  /** 从多套方案里找一套能成功的，全失败则抛出汇总信息 */
+  async function fetchBlob(url) {
+    const errors = []
+    for (let i = 0; i < FETCH_STRATEGIES.length; i++) {
+      const s = FETCH_STRATEGIES[i]
+      try {
+        const blob = await gmFetchBlobOnce(url, s.opts)
+        if (!blob || !blob.size) throw new Error('返回内容为空')
+        // 不是第一种方案成功，说明常规路径有问题，值得记一笔
+        if (i > 0) log(`⚠ 用备用方式下载成功：${s.name}`)
+        return blob
+      } catch (e) {
+        errors.push(`${s.name} → ${e.message}`)
+        log(`下载失败 [${s.name}]`, e.message)
+        // 明显是网络不可达时，后面的方案大概率也一样，少等一会
+        await sleep(i === 0 ? 400 : 200)
+      }
+    }
+    throw new Error('所有请求方式均失败｜' + errors.join('｜'))
+  }
+
+  /**
+   * 诊断用：在页面里找这张图对应的 <img>。
+   * 返回元素说明浏览器已经能把这张图从 CDN 拉下来（naturalWidth > 0），
+   * 那么下载失败就不是网络问题；返回 null 则更可能是网络/代理问题。
+   */
+  function probeImageInPage(url) {
+    try {
+      const file = String(url).split('/').pop().split('?')[0]
+      const key = file.replace(/\.(jpg|jpeg|png|gif|webp)$/i, '')
+      if (!key) return null
+      const imgs = document.querySelectorAll('img')
+      for (let i = 0; i < imgs.length; i++) {
+        const img = imgs[i]
+        const src = img.currentSrc || img.src || ''
+        if (src && src.indexOf(key) !== -1 && img.naturalWidth > 0) return img
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 
   // ============================================================
@@ -496,6 +572,7 @@
         const ext = extFromUrl(url)
 
         setStatus(`(${i + 1}/${targets.length}) 下载中…`, 'info')
+        log(`下载 [${i + 1}/${targets.length}]`, url)
 
         // 已存在则跳过（仅当模板能一一对应时才有意义）
         if (settings.skipExisting && (await fileExists(slot.handle, base + ext))) {
@@ -504,13 +581,19 @@
           continue
         }
 
+        // 诊断：这张图在页面上是否已经成功加载过。
+        // naturalWidth > 0 说明浏览器本身能访问 i.pximg.net，
+        // 那问题就出在 GM 请求上；否则是网络/代理问题。
+        const probe = probeImageInPage(url)
+        if (probe) log('页面内该图已加载（naturalWidth=' + probe.naturalWidth + '）→ 浏览器可访问该 CDN')
+
         let ok = false
         let lastErr = null
         for (let attempt = 0; attempt < 2 && !ok; attempt++) {
           try {
             if (attempt) {
               log('重试第', attempt, '次：', base + ext)
-              await sleep(800)
+              await sleep(1200)
             }
             const blob = await fetchBlob(url)
             if (!blob || !blob.size) throw new Error('返回内容为空')
@@ -523,14 +606,26 @@
             lastErr = e
           }
         }
-        if (!ok) errors.push(`${base}${ext}：${lastErr && lastErr.message}`)
+        if (!ok) {
+          const hint = !probe
+            ? '（页面上这张图也没加载出来，基本可以确定是网络/代理到不了 i.pximg.net）'
+            : '（页面能显示这张图，说明网络通，问题在请求本身）'
+          errors.push(`${base}${ext}：${lastErr && lastErr.message}${hint}`)
+        }
 
         await sleep(300) // 轻微限速
       }
 
       if (errors.length) {
-        setStatus(`完成：写入 ${written}，跳过 ${skipped}，失败 ${errors.length}（详见控制台）`, 'err')
+        setStatus(
+          `完成：写入 ${written}，跳过 ${skipped}，失败 ${errors.length}（详见控制台 F12）`,
+          'err'
+        )
         errors.forEach((e) => warn('失败：', e))
+        warn(
+          '排查提示：若提示"网络错误"，请检查代理是否覆盖 pximg.net；' +
+            '若页面上图片本身就不显示，则属于网络问题而非脚本问题。'
+        )
       } else {
         setStatus(`完成：写入 ${written} 张${skipped ? `，跳过 ${skipped} 张` : ''} → ${slot.name}`, 'ok')
       }
