@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pixiv 存图
 // @namespace    https://github.com/Yshuinuan/pixiv-save
-// @version      2.3.0
+// @version      2.3.1
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
 // @author       Yshuinuan
 // @homepageURL  https://github.com/Yshuinuan/pixiv-save
@@ -27,6 +27,12 @@
   const TAG = '[Pixiv存图]'
   const log = (...a) => console.log(TAG, ...a)
   const warn = (...a) => console.warn(TAG, ...a)
+
+  /** 运行中的脚本版本，面板和日志里都会显示，避免"我到底装没装到新版"的困惑 */
+  const SCRIPT_VERSION =
+    typeof GM_info !== 'undefined' && GM_info.script && GM_info.script.version
+      ? GM_info.script.version
+      : '?'
 
   if (typeof window.showDirectoryPicker !== 'function') {
     // 不静默失败，直接给用户看得见的提示
@@ -1018,6 +1024,7 @@
     panel.innerHTML = `
       <div id="ps-head">
         <span>Pixiv 存图</span>
+        <span class="ps-ver">v${SCRIPT_VERSION}</span>
         <span style="flex:1"></span>
         <span id="ps-fold" title="折叠/展开">—</span>
       </div>
@@ -1071,6 +1078,7 @@
       #ps-head { display:flex; align-items:center; gap:6px; padding:8px 10px;
         background:#2a2a31; font-weight:600; font-size:12.5px; cursor:move; user-select:none; }
       #ps-fold { cursor:pointer; padding:0 4px; }
+      .ps-ver { font-size:10.5px; color:#7d7d88; font-weight:400; }
       #ps-body { padding:10px; display:flex; flex-direction:column; gap:8px; }
       #ps-body.ps-hidden { display:none; }
       .ps-label { font-size:11.5px; color:#8b8b96; }
@@ -1347,7 +1355,7 @@
     } else {
       setStatus('点「＋」添加一个保存文件夹', 'info')
     }
-    log('已加载。当前页面：', getContext(), '| 已有路径：', runtime.slots.map((x) => x.name))
+    log(`已加载 v${SCRIPT_VERSION}。当前页面：`, getContext(), '| 已有路径：', runtime.slots.map((x) => x.name))
   }
 
   main()
