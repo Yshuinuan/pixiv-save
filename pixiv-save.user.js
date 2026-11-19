@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Pixiv 存图
 // @namespace    https://github.com/Yshuinuan/pixiv-save
-// @version      2.2.1
+// @version      2.2.2
 // @description  先点路径选中（高亮），再点「存当前页」把当前 Pixiv 插画或小说保存到该文件夹。插画存原图，小说存 Markdown 或纯文本。支持多路径切换。仅 Chrome / Edge 可用。
 // @author       Yshuinuan
 // @homepageURL  https://github.com/Yshuinuan/pixiv-save
@@ -607,9 +607,11 @@
           }
         }
         if (!ok) {
-          const hint = !probe
-            ? '（页面上这张图也没加载出来，基本可以确定是网络/代理到不了 i.pximg.net）'
-            : '（页面能显示这张图，说明网络通，问题在请求本身）'
+          // 诊断结论：页面能显示 = 网络通，问题在扩展的请求权限；
+          // 页面也显示不出 = 更可能是网络/代理。
+          const hint = probe
+            ? '（页面能正常显示这张图 → 网络是通的，问题在扩展请求权限：请检查 chrome://extensions 里 Tampermonkey 的「网站访问权限」是否设为"在所有网站上"）'
+            : '（页面也没能加载这张图 → 更可能是网络/代理到不了 i.pximg.net；也可能是站点访问权限受限）'
           errors.push(`${base}${ext}：${lastErr && lastErr.message}${hint}`)
         }
 
@@ -623,8 +625,9 @@
         )
         errors.forEach((e) => warn('失败：', e))
         warn(
-          '排查提示：若提示"网络错误"，请检查代理是否覆盖 pximg.net；' +
-            '若页面上图片本身就不显示，则属于网络问题而非脚本问题。'
+          '排查提示：报"网络错误"时，最常见的原因是 Chrome 限制了 Tampermonkey 的站点访问权限。' +
+            '请打开 chrome://extensions → Tampermonkey → 详细信息 → 网站访问权限，改为"在所有网站上"。' +
+            '其次检查代理是否覆盖 pximg.net；若页面上的图片本身也显示不出来，那才是网络问题。'
         )
       } else {
         setStatus(`完成：写入 ${written} 张${skipped ? `，跳过 ${skipped} 张` : ''} → ${slot.name}`, 'ok')

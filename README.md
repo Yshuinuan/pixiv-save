@@ -50,13 +50,30 @@ Allow User Scripts
 
 如果找不到这一项，说明你的 Chrome 早于 138 版，改用老办法：在同一页**右上角**打开 **「开发者模式 / Developer mode」**。
 
-### 3. 安装脚本
+### 3. 把「网站访问权限」设为「在所有网站上」⚠️
+
+**这一步非常关键，漏掉会导致"网页能开、但图片存不下来"。**
+
+在同一个详情页继续往下找 **「网站访问权限 / Site Access」**，改成：
+
+```
+网站访问权限    在所有网站上
+                On all sites
+```
+
+**为什么必须这样？** 图片服务器 `i.pximg.net` 和网页 `www.pixiv.net` 是**两个不同的域名**。Chrome 如果把扩展的访问权限限制成"在特定网站上"，Tampermonkey 就只能访问列表里的站点——`www.pixiv.net` 能访问（脚本靠 `@match` 匹配），`i.pximg.net` 访问不了，下载就会失败并报 **"网络错误"**。
+
+Tampermonkey 官方 FAQ 对此有明确说明（[Q306](https://www.tampermonkey.net/faq.php?locale=zh-CN&q=Q306)）：主机权限受限时，**`GM_xmlhttpRequest` 对其它主机的请求将无法工作**，自动更新也会失效。
+
+> 如果你在 Tampermonkey 弹窗里看到黄色警告「Limited runtime host permissions might break some Tampermonkey features」，就是这个问题。
+
+### 4. 安装脚本
 
 下载 [`pixiv-save.user.js`](./pixiv-save.user.js)，把它**拖进 Tampermonkey 的管理面板**，在弹出的安装页点「安装」。
 
 或者：Tampermonkey 面板 → 点 `+` 新建脚本 → 把文件内容全部粘贴进去 → `Ctrl+S` 保存。
 
-### 4. 验证
+### 5. 验证
 
 打开任意 Pixiv 作品页，按 `F12` 打开控制台，应该看到：
 
@@ -156,21 +173,32 @@ Pixiv 图片服务器（`i.pximg.net`）有防盗链。脚本已通过扩展层�
 
 **提示"网络错误"（最常见）**
 
-`网络错误` 表示请求**根本没收到 HTTP 响应**，属于连接层问题，不是 Pixiv 拒绝了你（那种情况会显示 `HTTP 403`）。
+`网络错误` 表示请求**根本没收到 HTTP 响应**，不是 Pixiv 拒绝了你（那种情况会显示 `HTTP 403`）。
 
-先做一步判断：**打开那个作品页，看图片本身能不能显示。**
+### 第一嫌疑：站点访问权限（先查这个）
 
-| 现象 | 结论 | 怎么修 |
-|---|---|---|
-| 图片正常显示 | 网络能到 `i.pximg.net`，问题在请求方式 | 把控制台日志发到 Issue |
-| 图片是裂图/一直转圈 | **到不了 `i.pximg.net`** | 见下 |
+**如果你的图片在网页上显示正常、右键能打开，但脚本存不下来——基本就是这个问题。**
 
-国内网络下，`www.pixiv.net` 和 `i.pximg.net` 是**两个不同的域名、不同的 IP**，代理往往只覆盖了前者。所以会出现"网页能开，图下不下来"：
+Chrome 把 Tampermonkey 的「网站访问权限」限制成"在特定网站上"时，扩展只能访问列表内的域名。`www.pixiv.net` 在列表里（脚本靠 `@match` 匹配），但图片服务器 `i.pximg.net` **不在**，请求会在扩展层被拦下。
+
+修复（30 秒）：
+
+1. 打开 `chrome://extensions`
+2. Tampermonkey → **详细信息**
+3. **网站访问权限** → 改为 **「在所有网站上」**
+
+证据：Tampermonkey [官方 FAQ Q306](https://www.tampermonkey.net/faq.php?locale=zh-CN&q=Q306) 明确写着，主机权限受限时 `GM_xmlhttpRequest` 对其它主机的请求**无法工作**，自动更新也会失效。
+
+脚本会在失败时打印诊断：如果出现 `页面内该图已加载（naturalWidth=...）`，说明浏览器能访问该 CDN，问题就在权限而非网络。
+
+### 第二嫌疑：代理没覆盖 pximg.net
+
+排除权限问题后，再看网络。`www.pixiv.net` 和 `i.pximg.net` 是**两个不同的域名、不同的 IP**，代理往往只覆盖了前者：
 
 - 用 Clash 等工具时，确认规则里 `pximg.net` 也走代理（最省事：临时切「全局模式」验证）
 - 或在规则里加 `DOMAIN-SUFFIX,pximg.net,你的代理组`
 
-脚本会记录 `页面内该图已加载（naturalWidth=...）` 这条日志：如果出现它，说明浏览器能访问 CDN，问题不在网络；如果没出现，基本可以确定是网络问题。
+如果**网页上的图片本身就是裂图**，那才基本可以确定是网络问题。
 
 **刷新后需要重新授权**
 
